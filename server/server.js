@@ -1,33 +1,33 @@
 require('./config/config');
+
 const express = require('express');
-const app = express();
+const mongoose = require('mongoose');
 const bodyParser = require('body-parser');
 
-app.use(bodyParser.urlencoded({ extended: false }));
+const app = express();
 
+//parsear body a json(sirve para los envios de formularios)
+app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-app.get('/usuario', (req, res) => {
-    res.json('get Usuario')
-});
-app.post('/usuario', (req, res) => {
-    let body = req.body;
-    if (body.nombre === undefined) {
-        res.status(400).json({
-            ok: false,
-            mensaje: 'El nombre es necesario'
-        });
-    } else {
-        res.json({ persona: body });
-    }
-});
-app.put('/usuario/:id', (req, res) => {
-    let id = req.params.id;
-    res.json({ id });
-});
-app.delete('/usuario', (req, res) => {
-    res.json('delete Usuario')
-});
+//traigo las rutas definidas en la carpeta route
+app.use(require('./routes/usuario'));
+
+//configuraciones por defecto de mongoose
+mongoose.set("useNewUrlParser", true);
+mongoose.set("useUnifiedTopology", true);
+mongoose.set('useCreateIndex', true);
+
+//conexion a mongoose
+mongoose.connect(process.env.URLDB, (err, res) => {
+
+    if (err) throw err;
+
+    console.log("Base de datos ONLINE");
+
+})
+
+//puerto de express
 app.listen(process.env.PORT, () => {
     console.log(`Escuchando el puerto ${process.env.PORT}`);
 })
