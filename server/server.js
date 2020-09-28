@@ -10,8 +10,8 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-//traigo las rutas definidas en la carpeta route
-app.use(require('./routes/usuario'));
+//configuracion global de rutas
+app.use(require('./routes/index'));
 
 //configuraciones por defecto de mongoose
 mongoose.set("useNewUrlParser", true);
