@@ -6,6 +6,29 @@ let app = express();
 let Producto = require('../models/producto');
 
 // ============================
+// Buscar productos 
+// ============================
+app.get('/productos/buscar/:termino', verificaToken, (req, res) => {
+    let termino = req.params.termino;
+    //expresion regular
+    let regEx = new RegExp(termino, 'i'); //i es no case sensitive
+    Producto.find({ nombre: regEx, disponible: true })
+        .populate('categoria', 'descripcion')
+        .exec((err, productos) => {
+            if (err) {
+                return res.status(500).json({
+                    ok: false,
+                    err
+                });
+            }
+            res.json({
+                ok: true,
+                productos
+            })
+        })
+});
+
+// ============================
 // Obtener todos los productos 
 // ============================
 app.get('/productos', verificaToken, (req, res) => {
@@ -13,8 +36,8 @@ app.get('/productos', verificaToken, (req, res) => {
     //paginar
     let desde = req.params.desde || 0;
     let limite = req.params.limite || 5;
-    Producto.find({})
-        .start(desde)
+    Producto.find({ disponible: true })
+        .skip(desde)
         .limit(limite)
         .populate('usuario', 'nombre email')
         .populate('categoria', 'descripcion')
@@ -46,6 +69,14 @@ app.get('/productos/:id', verificaToken, (req, res) => {
                 err
             });
         }
+        if (!productoBD) {
+            res.status(400).json({
+                ok: false,
+                err: {
+                    message: "El ID no existe"
+                }
+            })
+        }
         return res.json({
             ok: true,
             producto
@@ -75,7 +106,7 @@ app.post('/productos', verificaToken, (req, res) => {
                 err
             });
         }
-        return res.json({
+        return res.status(201).json({
             ok: true,
             producto: productoBD
         });
@@ -87,7 +118,7 @@ app.post('/productos', verificaToken, (req, res) => {
 // ============================
 app.put('/productos/:id', verificaToken, (req, res) => {
     let id = req.params.id;
-    let body = _.pick(req.body, 'nombre precioUni descripcion disponible categoria');
+    let body = _.pick(req.body, ['nombre', 'precioUni', 'descripcion', 'categoria']);
     Producto.findByIdAndUpdate(id, body, { new: true, runValidators: true, context: 'query' })
         .exec((err, productoBD) => {
             if (err) {
@@ -95,6 +126,14 @@ app.put('/productos/:id', verificaToken, (req, res) => {
                     ok: false,
                     err
                 });
+            }
+            if (!productoBD) {
+                return res.status(400).json({
+                    ok: false,
+                    err: {
+                        message: "El ID no existe"
+                    }
+                })
             }
             return res.json({
                 ok: true,

@@ -22,6 +22,7 @@ app.use(require('./routes/index'));
 mongoose.set("useNewUrlParser", true);
 mongoose.set("useUnifiedTopology", true);
 mongoose.set('useCreateIndex', true);
+mongoose.set('useFindAndModify', false);
 
 //conexion a mongoose
 mongoose.connect(process.env.URLDB, (err, res) => {
