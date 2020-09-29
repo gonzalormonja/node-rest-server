@@ -1,0 +1,819 @@
+<?php
+  
+  require_once(__DIR__."/notificacionController.php");
+  require_once(__DIR__."/../modelos/conexionEloquent.php");
+  require_once(__DIR__."/../modelos/empleado.php");     
+  require_once(__DIR__."/../modelos/listaEmpleado.php");	
+  require_once(__DIR__."/../modelos/empresa.php");	
+  require_once(__DIR__."/../modelos/pedido.php");
+  require_once(__DIR__."/../modelos/plantilla.php");
+  require_once(__DIR__."/../modelos/proveedor.php");
+  require_once(__DIR__."/../modelos/fecha.php");
+  require_once(__DIR__."/../modelos/diaSemana.php");
+  require_once(__DIR__."/../modelos/menu.php");
+  require_once(__DIR__."/../modelos/foto.php");
+  require_once(__DIR__."/../modelos/cliente.php");
+  require_once(__DIR__."/../modelos/direccion.php");
+  require_once(__DIR__."/../modelos/precio.php");
+  require_once(__DIR__."/../modelos/horarioReparto.php");
+  require_once(__DIR__."/../modelos/ingrediente.php");
+  require_once(__DIR__."/../modelos/administrador.php");
+  require_once(__DIR__."/../modelos/remito.php");
+  require_once(__DIR__."/../util/validaciones.php");
+	use Illuminate\Database\Capsule\Manager as DB;
+
+    class pedidoController{
+        public static function updateState($idPedido,$state){
+          if(isset($_SESSION['id'])&&!empty($_SESSION['id'])){
+            $usuario = Usuario::where('idUsuario',$_SESSION['id'])->first();
+            if($usuario->getTipoUsuario->tabla!="Proveedor"&&$usuario->getTipoUsuario->tabla!="Administrador"){
+              return false;
+            }
+          }else{
+            return false;
+          }
+          $pedido = Pedido::where('idPedido',$idPedido)->first();
+          if($pedido->menu->idProveedor==$usuario->proveedor->idProveedor){
+            $ahora = new DateTime();
+            $horarioReparto = $pedido->horarioReparto;
+            $fechaEnvioDesde = new DateTime($pedido->fecha);
+            $horaRepartoDesde = explode(':',$horarioReparto->horaRepartoDesde);
+            $fechaEnvioDesde->modify('+'.$horaRepartoDesde[0].' hours');
+            $fechaEnvioDesde->modify('+'.$horaRepartoDesde[1].' minute');
+            $fechaEnvioDesde->modify('+'.$horaRepartoDesde[2].' second');
+            if($state=="Enviado"){
+              if($ahora>=$fechaEnvioDesde){
+                $pedido->estado=$state;
+                $pedido->save();
+                return true;
+              }else{
+                return "horaReparto";
+              }
+            }else{
+              $pedido->estado=$state;
+              $pedido->save();
+              return true;
+            }
+          }
+          return false;
+        }
+        public static function getAllDataTable($idsPedidos=null,$idProveedor=null){
+          // if(isset($idsPedidos)){
+          //   $ids = explode(",",$idsPedidos);
+          //   foreach($ids as $i){
+          //     notificacionController::updateState($i);
+          //   }
+          // }
+          $data = [];
+          if(isset($_SESSION['id'])&&!empty($_SESSION['id'])){
+            $usuario = Usuario::where('idUsuario',$_SESSION['id'])->first();
+            if($usuario->getTipoUsuario->tabla!="Proveedor"&&$usuario->getTipoUsuario->tabla!="Administrador"){
+              return false;
+            }
+          }else{
+            return false;
+          }
+          if(isset($idProveedor)){
+            $proveedor = Proveedor::where('idProveedor',$idProveedor)->first();
+          }else{
+            $proveedor = $usuario->proveedor;
+          }
+          if(isset($proveedor)){
+            $sql = 'select 
+            p.idPedido as idPedido,
+            case
+              when emp.nombre is not null then emp.nombre
+                else cli.nombre
+            end
+            as comensal,
+            case
+              when empr.nombre is not null then empr.nombre
+                else "particular"
+            end
+            as empresa,
+            p.direccionEntrega as direccion,
+            date_format(p.fecha, "%d/%m/%Y") as fechaEntrega,
+            p.fecha as fechaEntregaSinFormato,
+            p.stringHorarioReparto as horarioEntrega,
+            case
+            when p.nombreMenu is not null AND p.nombreBebida is not null AND p.nombrePostre is not null
+            then concat(p.nombreMenu," + ",p.nombrePostre," + ",p.nombreBebida)
+            when p.nombreMenu is not null AND p.nombrePostre is not null
+            then concat(p.nombreMenu," + ",p.nombrePostre)
+            when p.nombreMenu is not null AND p.nombreBebida is not null
+            then concat(p.nombreMenu," + ",p.nombreBebida)
+            else
+            p.nombreMenu 
+            END as menu,
+            p.detallePedido as detallePedido,
+            p.cantidad as cantidad,
+            p.precioEmpleado as precioUsuario,
+            p.precioEmpresa as precioEmpresa,
+            case when p.valido = 0 then p.estado 
+            else "cancelado" end as estado,
+            p.created_at as fechaPedido,
+            p.precioEnvio as precioEnvio,
+            p.nroPedido as nroPedido
+            from pedidos p 
+            inner join menus m on m.idMenu=p.idMenu
+            left join empleados emp on emp.idUsuario=p.idUsuario
+            left join clientesFinales cli on cli.idUsuario=p.idUsuario
+            left join empresas empr on empr.idEmpresa=emp.idEmpresa
+            left join empresasProveedores emprov on empr.idEmpresa=emprov.idEmpresa and emprov.idProveedor=m.idProveedor
+            left join horarioReparto hr on hr.idHorarioReparto=p.idHorarioReparto
+            where case when emprov.idEmpresa is not null then emprov.fechaFin is null or emprov.fechaFin>=p.fecha 
+            when cli.idUsuario then 1=1 end
+            AND m.idProveedor='.$proveedor->idProveedor;
+            if(isset($idsPedidos)){
+              $sql.=' AND p.idPedido in('.$idsPedidos.') ';
+            }
+            $sql .=' ORDER BY p.fecha DESC, hr.horaRepartoDesde DESC, p.stringHorarioReparto DESC,p.nroPedido ASC';
+            $data = DB::select($sql);
+          }else{
+            $pedidos = Pedido::select('pedidos.*')
+            ->join('menus','menus.idMenu','=','pedidos.idMenu')->get();
+          }
+          return $data;
+        }
+        public static function getAllLogistica($seleccion,$horarioReparto,$fecha,$idZonaReparto=null,$idProveedor=null){
+          $data = [];
+          if(isset($_SESSION['id'])&&!empty($_SESSION['id'])){
+            $usuario = Usuario::where('idUsuario',$_SESSION['id'])->first();
+            if($usuario->getTipoUsuario->tabla!="Proveedor"&&$usuario->getTipoUsuario->tabla!="Administrador"){
+              return false;
+            }
+          }else{
+            return false;
+          }
+          if(isset($idProveedor)){
+            $proveedor = Proveedor::where('idProveedor',$idProveedor)->first();
+          }else{
+            $proveedor = $usuario->proveedor;
+          }
+          if(isset($proveedor)){
+            //busco primero las direcciones de los pedidos en esa zona:
+            if($seleccion==-1){
+              if(isset($idZonaReparto)){
+                $sql = "SELECT DISTINCT p.idUsuario,d.direccion,d.detalleDireccion,d.lat,d.lng FROM direcciones d 
+                INNER JOIN pedidos p ON p.idDireccion = d.idDireccion
+                INNER JOIN menus m on m.idMenu=p.idMenu
+                WHERE m.idProveedor=".$proveedor->idProveedor." AND p.valido=0 AND p.stringHorarioReparto='".$horarioReparto."'
+                AND p.idZonaReparto=".$idZonaReparto;
+              }  
+            }else{
+              $sql = "SELECT DISTINCT d.direccion,d.detalleDireccion,d.lat,d.lng FROM direcciones d 
+              INNER JOIN pedidos p ON p.idDireccion = d.idDireccion
+              INNER JOIN menus m on m.idMenu=p.idMenu
+              WHERE m.idProveedor=".$proveedor->idProveedor." AND p.valido=0 AND p.stringHorarioReparto='".$horarioReparto."'";
+            }
+            $data = DB::select($sql);
+            $resp = [];
+            foreach($data as $d){
+              //para cada direccion busco sus pedidos:
+              $sql2 = 'select 
+              p.idPedido as idPedido,
+              p.direccionEntrega as direccion,
+              d.detalleDireccion as detalleDireccion,
+              d.lat as latitud,
+              d.lng as longitud,
+              p.fecha,
+              p.detallePedido,
+              hr.horaRepartoDesde,
+              hr.horaRepartoHasta,
+              p.nombreMenu as menu, 
+              postre.nombre as postre,
+              bebida.nombre as bebida,
+              p.cantidad as cantidad,
+              case
+                when p.tipoPago=2 then p.precioEmpleado+p.precioEnvio
+                else 0 end as pagoDestino,
+              case
+                when p.tipoPago=2 then "contraentrega"
+                when p.tipoPago=3 then "empresa"
+                else "mercadopago" end as tipoPago,
+              case 
+                when cli.idUsuario is not null then CONCAT(cli.nombre," ",cli.apellido)
+                else CONCAT(emp.nombre," ",emp.apellido) END as nombreComensal,
+			        dirProv.lat as latitudProveedor,
+              dirProv.lng as longitudProveedor,
+              dirProv.direccion as direccionProveedor,
+              dirProv.detalleDireccion as detalleDireccionProveedor
+              from pedidos p
+              inner join menus m on m.idMenu=p.idMenu
+              inner join usuarios u on u.idUsuario=p.idUsuario
+              inner join direcciones d on d.idDireccion=p.idDireccion
+              inner join proveedores prov on prov.idProveedor=m.idProveedor
+              inner join direcciones dirProv on dirProv.idUsuario=prov.idUsuario
+              inner join horarioReparto hr on hr.idHorarioReparto=p.idHorarioReparto
+              left join empleados emp on emp.idUsuario=p.idUsuario
+              left join menus postre on postre.idMenu=p.idPostre
+              left join menus bebida on bebida.idMenu=p.idBebida
+              left join clientesFinales cli on cli.idUsuario=p.idUsuario
+              left join empresas empr on empr.idEmpresa=emp.idEmpresa
+              left join empresasProveedores emprov on empr.idEmpresa=emprov.idEmpresa and emprov.idProveedor=m.idProveedor
+              where case when emprov.idEmpresa is not null then emprov.fechaFin is null or emprov.fechaFin >= p.fecha 
+              when cli.idUsuario then 1=1 end
+              AND d.direccion="'.$d->direccion.'" AND d.detalleDireccion="'.$d->detalleDireccion.'" AND d.lat='.$d->lat.' 
+              AND d.lng='.$d->lng.' AND p.stringHorarioReparto = "'.$horarioReparto.'" AND p.valido=0';
+              if($seleccion==0){
+                return false;
+              }elseif($seleccion==-1){
+                $sql2.=" AND u.idUsuario=".$d->idUsuario." AND u.tipoUsuario=5 ";
+              }else{
+                $sql2.=" AND u.tipoUsuario=2";
+              }
+              $fechaFormateada = new DateTime($fecha);
+              $sql2.= " AND p.fecha='".$fechaFormateada->format('Y-m-d')."';";
+              $dat = DB::select($sql2);
+              if(count($dat)>0){
+                $resp[] = $dat;
+              }
+            }
+            return $resp;
+          }
+          return false;
+        }
+        public static function getPedidosCocina($fecha=null,$horario=null,$tipoProd=null,$idProveedor=null){
+          /*
+            DESC devuelve un listado separado de menus, postres y bebidas con su correspondientes cantidades a cocinar en un 
+            determinado dia y horario
+          */
+
+          /*
+            hacer que busque el proximo horario si no envia fechas
+          */
+          if(!isset($fecha)){
+            $fecha = new DateTime();
+            $fecha = $fecha->format('Y-m-d');
+          }else{
+            $fecha = explode("-",$fecha);
+            $fecha = $fecha[2].'-'.$fecha[1].'-'.$fecha[0];
+          }
+          if(isset($idProveedor)){
+            $admin = Usuario::where('id',$_SESSION['id'])->first();
+            if($admin->getTipoUsuario->tabla!="Administrador"){
+              return false;
+            }
+            $provedor = Proveedor::where('idProveedor',$idProveedor)->first();
+          }else{
+            $proveedor = Proveedor::where('idUsuario',$_SESSION['id'])->first();
+          }
+          if(!isset($proveedor)||!isset($horario)){return false;}
+          if($horario!=""){
+            $horarioRepartoDesde = explode(' a ',$horario)[0];
+            $horarioRepartoHasta = explode(' a ',$horario)[1];
+          }
+          $menus = [];
+          $postres = [];
+          $bebidas = [];
+          if($tipoProd=="todos" || $tipoProd=="menus"){
+            $sql = "SELECT  
+                        p.nombreMenu as nombre,
+                        m.descripcion,
+                        case when c.nombre is not null then c.nombre else 'Sin categoría' END as tipo,
+                        sum(p.cantidad) as cantidad,
+                        p.stringHorarioReparto as horarioReparto
+                    FROM pedidos p 
+                    INNER JOIN menus m on m.idMenu=p.idMenu
+                    INNER JOIN fechas f on f.idFecha=p.idFecha
+                    INNER JOIN horarioReparto hr on hr.idHorarioReparto = p.idHorarioReparto
+                    LEFT JOIN categorias c on c.idCategoria = m.idCategoria AND m.idProveedor=c.idProveedor
+                    WHERE m.idProveedor=$proveedor->idProveedor
+                      AND f.fecha='$fecha'
+                      ";
+            if($horario!=""){
+              $sql .=" AND hr.horaRepartoDesde='$horarioRepartoDesde'
+              AND hr.horaRepartoHasta='$horarioRepartoHasta' ";
+            }
+            $sql .= " AND p.valido = 0
+                    GROUP BY p.nombreMenu,m.descripcion,tipo,horarioReparto ";
+            $menus = DB::select($sql);
+          }
+          if($tipoProd=="todos" || $tipoProd=="postres"){
+            $sql = "SELECT  
+                        p.nombrePostre as nombre,
+                        m.descripcion,
+                        'postre' as tipo,
+                        sum(p.cantidad) as cantidad,
+                        p.stringHorarioReparto as horarioReparto
+                    FROM pedidos p 
+                    INNER JOIN menus m on m.idMenu=p.idPostre
+                    INNER JOIN fechas f on f.idFecha=p.idFecha
+                    INNER JOIN horarioReparto hr on hr.idHorarioReparto = p.idHorarioReparto
+                    WHERE m.idProveedor=$proveedor->idProveedor
+                      AND f.fecha='$fecha'";
+            if($horario!=""){
+              $sql .=" AND hr.horaRepartoDesde='$horarioRepartoDesde'
+              AND hr.horaRepartoHasta='$horarioRepartoHasta' ";
+            }
+            $sql .= " AND p.valido = 0
+                    GROUP BY p.nombrePostre,m.descripcion,horarioReparto";
+            $postres = DB::select($sql);
+          }
+          if($tipoProd=="todos" || $tipoProd=="bebidas"){
+            $sql = "SELECT  
+                        p.nombreBebida as nombre,
+                        m.descripcion,
+                        'bebida' as tipo,
+                        sum(p.cantidad) as cantidad,
+                        p.stringHorarioReparto as horarioReparto
+                    FROM pedidos p 
+                    INNER JOIN menus m on m.idMenu=p.idBebida
+                    INNER JOIN fechas f on f.idFecha=p.idFecha
+                    INNER JOIN horarioReparto hr on hr.idHorarioReparto = p.idHorarioReparto
+                    WHERE m.idProveedor=$proveedor->idProveedor
+                      AND f.fecha='$fecha'";
+            if($horario!=""){
+              $sql .=" AND hr.horaRepartoDesde='$horarioRepartoDesde'
+              AND hr.horaRepartoHasta='$horarioRepartoHasta' ";
+            }
+            $sql .= " AND p.valido = 0
+                    GROUP BY p.nombreBebida,m.descripcion,horarioReparto";
+            $bebidas = DB::select($sql);
+          }
+          $pedidos = array_merge($menus,$postres);
+          $pedidos = array_merge($pedidos,$bebidas);
+          return $pedidos;
+        }
+        public static function getPedidosReparto($fecha=null,$horario=null,$idDireccion=null,$idProveedor=null){
+          /*
+          DESC  esta funcion devuelve un listado de los pedidos de un determinado proveedor en un determinado dia y horario
+                el formato es un array q tiene las direcciones y dentro los menus q tiene q entregar con sus cantidades y adicionales
+                si le pasas la direccion te dice lo q hay q entregar en ese lugar
+          */
+          if(!isset($fecha)){
+            $fecha = new DateTime();
+            $fecha = $fecha->format('Y-m-d');
+          }else{
+            $fecha = explode("-",$fecha);
+            $fecha = $fecha[2].'-'.$fecha[1].'-'.$fecha[0];
+          }
+          if(isset($idProveedor)){
+            $admin = Usuario::where('id',$_SESSION['id'])->first();
+            if($admin->getTipoUsuario->tabla!="Administrador"){
+              return false;
+            }
+            $provedor = Proveedor::where('idProveedor',$idProveedor)->first();
+          }else{
+            $proveedor = Proveedor::where('idUsuario',$_SESSION['id'])->first();
+          }
+          if(!isset($proveedor)||!isset($horario)){return false;}
+          $horarioRepartoDesde = explode(' a ',$horario)[0];
+          $horarioRepartoHasta = explode(' a ',$horario)[1];
+          if(isset($idDireccion)){
+            $f = explode("-",$fecha);
+            $direccion = Direccion::where('idDireccion',$idDireccion)->first();
+            $codIdentificacionRemito = $direccion->idDireccion.$horarioRepartoDesde.$horarioRepartoHasta.$f[0].$f[1].$f[2];
+            $nroRemito = $proveedor->remitos->where('codigoIdentificacion',$codIdentificacionRemito)->first();
+            if(!isset($nroRemito)||!$nroRemito){
+              $nroRemito=Remito::where('idProveedor',$proveedor->idProveedor)->orderBy('nroRemito','DESC')->first();
+              if(isset($nroRemito)&&$nroRemito&&$nroRemito->nroRemito>0){
+                $nroRemito++;
+              }else{
+                $nroRemito=1;
+              }
+              $remitoNuevo = new Remito();
+              $remitoNuevo->codigoIdentificacion=$codIdentificacionRemito;
+              $remitoNuevo->nroRemito=$nroRemito;
+            }
+            $usuario = $direccion->usuario;
+            $destinatario=null;
+            if($usuario->getTipoUsuario->tabla=="Empresa"){
+              $destinatario=array(
+                "nroRemito"=>$nroRemito,
+                "nombre"=>$usuario->empresa->nombre,
+                "telefono"=>$usuario->empresa->telefono,
+                "direccion"=>$direccion->direccion,
+                "detalleDireccion"=>$direccion->detalleDireccion
+              );
+            }else{
+              $destinatario=array(
+                "nroRemito"=>$nroRemito,
+                "nombre"=>$usuario->cliente->nombre.' '.$usuario->cliente->apellido,
+                "dni"=>$usuario->cliente->dni,
+                "telefono"=>$usuario->cliente->telefono,
+                "direccion"=>$direccion->direccion,
+                "detalleDireccion"=>$direccion->detalleDireccion
+              );
+            }
+            $sql = "SELECT  
+                        '$direccion->direccion' as direccion,
+                        case
+                        when p.nombreMenu is not null AND p.nombreBebida is not null AND p.nombrePostre is not null
+                        then concat(p.nombreMenu,' + ',p.nombrePostre,' + ',p.nombreBebida)
+                        when p.nombreMenu is not null AND p.nombrePostre is not null
+                        then concat(p.nombreMenu,' + ',p.nombrePostre)
+                        when p.nombreMenu is not null AND p.nombreBebida is not null
+                        then concat(p.nombreMenu,' + ',p.nombreBebida)
+                        else
+                        p.nombreMenu 
+                        END as menu,
+                        p.idBebida,
+                        p.idPostre,
+                        m.descripcion,
+                        sum(p.cantidad) as cantidad
+                    FROM pedidos p 
+                    INNER JOIN menus m on m.idMenu=p.idMenu
+                    INNER JOIN fechas f on f.idFecha=p.idFecha
+                    INNER JOIN horarioReparto hr on hr.idHorarioReparto = p.idHorarioReparto
+                    WHERE m.idProveedor=$proveedor->idProveedor
+                      AND f.fecha='$fecha'
+                      AND hr.horaRepartoDesde='$horarioRepartoDesde'
+                      AND hr.horaRepartoHasta='$horarioRepartoHasta'
+                      AND p.valido = 0
+                      AND idDireccion = $idDireccion
+                    GROUP BY direccion,menu,m.descripcion,p.idPostre,p.idBebida";
+              $pedidos[0] = $destinatario;
+              $pedidos[1] = DB::select($sql);
+              $cantPostre = 0;$cantBebida=0;$cantMenu=0;
+              foreach($pedidos[1] as $pedido){
+                if(isset($pedido->idPostre)&&$pedido->idPostre>0){
+                  $cantPostre += $pedido->cantidad;
+                }
+                if(isset($pedido->idBebida)&&$pedido->idBebida>0){
+                  $cantBebida += $pedido->cantidad;
+                }
+                $cantMenu += $pedido->cantidad;
+              }
+              $pedidos[2] = array(
+                "cantMenu" => $cantMenu,
+                "cantPostre" => $cantPostre,
+                "cantBebida" => $cantBebida,
+              );
+          }else{
+            $sql = "SELECT
+                      DISTINCT idDireccion
+                    FROM pedidos p
+                    INNER JOIN menus m on m.idMenu=p.idMenu
+                    INNER JOIN fechas f on f.idFecha=p.idFecha
+                    INNER JOIN horarioReparto hr on hr.idHorarioReparto = p.idHorarioReparto
+                    WHERE m.idProveedor=$proveedor->idProveedor
+                      AND f.fecha='$fecha'
+                      AND hr.horaRepartoDesde='$horarioRepartoDesde'
+                      AND hr.horaRepartoHasta='$horarioRepartoHasta'
+                      AND p.valido = 0";
+            $direcciones = DB::select($sql);
+            $pedidos = [];
+            foreach($direcciones as $direccion){
+              $direccion = Direccion::where('idDireccion',$direccion->idDireccion)->first();
+              $boton = "<button style=\'float:right;\' idDireccion=\'$direccion->idDireccion\' class=\'btn btn-sm btn-success\'><i class=\'fa fa-download\' aria-hidden=\'true\'></i> &nbsp;REMITO</button>";
+              $sql = "SELECT 
+                        concat('$direccion->direccion','$boton') as direccion,
+                        '$direccion->direccion' as direccionRemito, 
+                        case
+                        when p.nombreMenu is not null AND p.nombreBebida is not null AND p.nombrePostre is not null
+                        then concat(p.nombreMenu,' + ',p.nombrePostre,' + ',p.nombreBebida)
+                        when p.nombreMenu is not null AND p.nombrePostre is not null
+                        then concat(p.nombreMenu,' + ',p.nombrePostre)
+                        when p.nombreMenu is not null AND p.nombreBebida is not null
+                        then concat(p.nombreMenu,' + ',p.nombreBebida)
+                        else
+                        p.nombreMenu 
+                        END as menu,
+                        m.descripcion,
+                        sum(p.cantidad) as cantidad
+                      FROM pedidos p 
+                      INNER JOIN menus m on m.idMenu=p.idMenu
+                      INNER JOIN fechas f on f.idFecha=p.idFecha
+                      INNER JOIN horarioReparto hr on hr.idHorarioReparto = p.idHorarioReparto
+                      WHERE m.idProveedor=$proveedor->idProveedor
+                        AND f.fecha='$fecha'
+                        AND hr.horaRepartoDesde='$horarioRepartoDesde'
+                        AND hr.horaRepartoHasta='$horarioRepartoHasta'
+                        AND p.valido = 0
+                        AND idDireccion = $direccion->idDireccion
+                      GROUP BY direccion,menu,m.descripcion";
+                      $pedidos = array_merge($pedidos,DB::select($sql));
+            }
+          }
+          return $pedidos;
+        }
+        public static function getOne($idPedido,$idProveedor=null){
+          if(isset($idProveedor)){
+            $proveedor = Proveedor::where('idProveedor',$idProveedor)->first();
+          }else{
+            $proveedor = Proveedor::where('idUsuario',$_SESSION['id'])->first();
+          }
+          $pedido = Pedido::where('idPedido',$idPedido)->first();
+          if($pedido->menu->proveedor->idProveedor == $proveedor->idProveedor){
+            if($pedido->usuario->getTipoUsuario->tabla=="Empleado"){
+              $nombre=$pedido->usuario->empleado->nombre;
+              $tipo="Empleado";
+            }else{
+              $nombre=$pedido->usuario->cliente->nombre;
+              $tipo="Cliente";
+            }
+            return array(
+              'nombre'=>$nombre,
+              'direccionEntrega'=>$pedido->direccion->direccion,
+              'nombreMenu'=>$pedido->menu->nombre,
+              'cantidad'=>$pedido->cantidad,
+              'fecha'=>$pedido->fecha,
+              'precioTotal'=>$pedido->precioTotal,
+              'estado'=>$pedido->estado,
+              'fechaCreacion'=>$pedido->created_at,
+              'fechaActualizacion'=>$pedido->updated_at,
+              'tipo'=>$tipo,
+              'direccion'=>$pedido->direccion->direccion,
+              'detalleDireccion'=>$pedido->direccion->detalleDireccion
+            );
+          }
+          return false;
+        }
+        public static function getLatLng($pedido){
+          $dir = $pedido->direccion;
+          return $dir;
+        }
+        public static function getPedidosEmpresaComparativo($idEmpresa=null,$idProveedor=null){
+          /* 
+            @desc devuelve la cantidad de pedidos que realizo una empresa
+            @param idEmpresa
+            @return int cantidadPedidos
+          */
+
+          $fechaMesActual = date('Y-m');
+          $f_mes_actual= date('Y-m-d',strtotime("{$fechaMesActual} + 1 month"));//le sumo un mes
+          $last_day_mes_actual = date('Y-m-d',strtotime("{$f_mes_actual} - 1 day"));//le resto un dia
+
+          $fechaMesAnterior= date('Y-m-d',strtotime("{$fechaMesActual} - 1 month"));//le sumo un mes
+          $f_mes_anterior= date('Y-m-d',strtotime("{$fechaMesAnterior} + 1 month"));//le sumo un mes
+          $last_day_mes_anterior = date('Y-m-d',strtotime("{$f_mes_anterior} - 1 day"));//le resto un dia
+          
+          if(isset($idProveedor)){
+            $proveedor = Proveedor::where('idProveedor',$idProveedor)->first();
+          }else{
+            $proveedor = Proveedor::where('idUsuario',$_SESSION['id'])->first();
+          }
+          if(isset($proveedor)){
+            if(isset($idEmpresa)){
+              $empresa = Empresa::select('empresas.*')
+                        ->join('empresasProveedores','empresasProveedores.idEmpresa','=','empresas.idEmpresa')
+                        ->where('empresasProveedores.idProveedor',$proveedor->idProveedor)
+                        ->where('empresas.idEmpresa',$idEmpresa)
+                        ->first();
+              if(isset($empresa)){
+                $cantidadPedidosMesActual = Pedido::select('pedidos.*')
+                                  ->join('empleados','empleados.idUsuario','=','pedidos.idUsuario')
+                                  ->where('empleados.idEmpresa',$empresa->idEmpresa)
+                                  ->where('pedidos.valido',0)
+                                  ->where('pedidos.fecha','>',$fechaMesActual.'-1')->where('pedidos.fecha','<',$last_day_mes_actual)
+                                  ->count();
+                $cantidadPedidosMesAnterior = Pedido::select('pedidos.*')
+                                  ->join('empleados','empleados.idUsuario','=','pedidos.idUsuario')
+                                  ->where('empleados.idEmpresa',$empresa->idEmpresa)
+                                  ->where('pedidos.valido',0)
+                                  ->where('pedidos.fecha','>',$fechaMesAnterior.'-1')->where('pedidos.fecha','<',$last_day_mes_anterior)
+                                  ->count();
+                return array("cantidadPedidosMesAnterior"=>$cantidadPedidosMesAnterior,"cantidadPedidosMesActual"=>$cantidadPedidosMesActual);
+              }
+            }else{
+              $empresas = $proveedor->empresas;
+              if(isset($empresas)){
+                $cantidadPedidosMesActual=0;
+                $cantidadPedidosMesAnterior=0;
+                foreach($empresas as $empresa){
+                  if($empresa){
+                    $cantidadPedidosMesActual += Pedido::select('pedidos.*')
+                                      ->join('empleados','empleados.idUsuario','=','pedidos.idUsuario')
+                                      ->where('empleados.idEmpresa',$empresa->idEmpresa)
+                                      ->where('valido',0)
+                                      ->where('fecha','>',$fechaMesActual.'-1')->where('fecha','<',$last_day_mes_actual)
+                                      ->count();
+                    $cantidadPedidosMesAnterior += Pedido::select('pedidos.*')
+                                      ->join('empleados','empleados.idUsuario','=','pedidos.idUsuario')
+                                      ->where('empleados.idEmpresa',$empresa->idEmpresa)
+                                      ->where('valido',0)
+                                      ->where('fecha','>',$fechaMesAnterior.'-1')->where('fecha','<',$last_day_mes_anterior)
+                                      ->count();
+                  }
+                }
+                return array("cantidadPedidosMesAnterior"=>$cantidadPedidosMesAnterior,"cantidadPedidosMesActual"=>$cantidadPedidosMesActual);
+              }
+            }
+            
+          }
+        }
+        public static function getPedidosTotalCompartivo($idProveedor=null){
+          $fechaMesActual = date('Y-m');
+          $f_mes_actual= date('Y-m-d',strtotime("{$fechaMesActual} + 1 month"));//le sumo un mes
+          $last_day_mes_actual = date('Y-m-d',strtotime("{$f_mes_actual} - 1 day"));//le resto un dia
+
+          $fechaMesAnterior= date('Y-m-d',strtotime("{$fechaMesActual} - 1 month"));//le sumo un mes
+          $f_mes_anterior= date('Y-m-d',strtotime("{$fechaMesAnterior} + 1 month"));//le sumo un mes
+          $last_day_mes_anterior = date('Y-m-d',strtotime("{$f_mes_anterior} - 1 day"));//le resto un dia
+          
+          if(isset($idProveedor)){
+            $proveedor = Proveedor::where('idProveedor',$idProveedor)->first();
+          }else{
+            $proveedor = Proveedor::where('idUsuario',$_SESSION['id'])->first();
+          }
+          if(isset($proveedor)){
+            $cantidadPedidosMesActual = Pedido::select('pedidos.*')
+            ->join('menus','menus.idMenu','=','pedidos.idMenu')
+            ->where('menus.idProveedor',$proveedor->idProveedor)
+            ->where('pedidos.fecha','>',$fechaMesActual.'-1')->where('pedidos.fecha','<',$last_day_mes_actual)
+            ->count();
+            $cantidadPedidosMesAnterior= Pedido::select('pedidos.*')
+            ->join('menus','menus.idMenu','=','pedidos.idMenu')
+            ->where('menus.idProveedor',$proveedor->idProveedor)
+            ->where('pedidos.fecha','>',$fechaMesAnterior.'-1')->where('pedidos.fecha','<',$last_day_mes_anterior)
+            ->count();
+            return array("cantidadPedidosMesAnterior"=>$cantidadPedidosMesAnterior,"cantidadPedidosMesActual"=>$cantidadPedidosMesActual);
+          }
+        }
+        public static function getPedidosParticularesCompartivo($idProveedor=null){
+
+          $fechaMesActual = date('Y-m');
+          $f_mes_actual= date('Y-m-d',strtotime("{$fechaMesActual} + 1 month"));//le sumo un mes
+          $last_day_mes_actual = date('Y-m-d',strtotime("{$f_mes_actual} - 1 day"));//le resto un dia
+
+          $fechaMesAnterior= date('Y-m-d',strtotime("{$fechaMesActual} - 1 month"));//le sumo un mes
+          $f_mes_anterior= date('Y-m-d',strtotime("{$fechaMesAnterior} + 1 month"));//le sumo un mes
+          $last_day_mes_anterior = date('Y-m-d',strtotime("{$f_mes_anterior} - 1 day"));//le resto un dia
+          
+          if(isset($idProveedor)){
+            $proveedor = Proveedor::where('idProveedor',$idProveedor)->first();
+          }else{
+            $proveedor = Proveedor::where('idUsuario',$_SESSION['id'])->first();
+          }
+          if(isset($proveedor)){
+            $cantidadPedidosMesActual = Pedido::select('pedidos.*')
+                        ->join('usuarios','usuarios.idUsuario','=','pedidos.idUsuario')
+                        ->join('menus','menus.idMenu','=','pedidos.idMenu')
+                        ->where('menus.idProveedor',$proveedor->idProveedor)
+                        ->where('usuarios.tipoUsuario',5)
+                        ->where('pedidos.fecha','>',$fechaMesActual.'-1')->where('pedidos.fecha','<',$last_day_mes_actual)
+                        ->count();
+            $cantidadPedidosMesAnterior= Pedido::select('pedidos.*')
+                      ->join('usuarios','usuarios.idUsuario','=','pedidos.idUsuario')
+                      ->join('menus','menus.idMenu','=','pedidos.idMenu')
+                      ->where('menus.idProveedor',$proveedor->idProveedor)
+                      ->where('usuarios.tipoUsuario',5)
+                      ->where('pedidos.fecha','>',$fechaMesAnterior.'-1')->where('pedidos.fecha','<',$last_day_mes_anterior)
+                      ->count();
+            return array("cantidadPedidosMesAnterior"=>$cantidadPedidosMesAnterior,"cantidadPedidosMesActual"=>$cantidadPedidosMesActual);
+          }
+        }
+        public static function getPedidosProveedorTotal($idProveedor=null){
+          if(isset($idProveedor)){
+            $proveedor = Proveedor::where('idProveedor',$idProveedor)->first();
+          }else{
+            $proveedor = Proveedor::where('idUsuario',$_SESSION['id'])->first();
+          }
+          if(isset($proveedor)){
+            $pedidos = Pedido::select('pedidos.*')
+            ->join('menus','menus.idMenu','=','pedidos.idMenu')
+            ->where('menus.idProveedor',$proveedor->idProveedor)
+            ->where('pedidos.valido',0)
+            ->count();
+            return $pedidos;
+          }
+        }
+        public static function getGananciasEmpresaComparativo($idEmpresa=null,$idProveedor=null){
+          /* 
+            @desc devuelve la ganancia de una o todas las empresas
+            @param idEmpresa
+            @return int cantidadPedidos
+          */
+          $fechaMesActual = date('Y-m');
+          $f_mes_actual= date('Y-m-d',strtotime("{$fechaMesActual} + 1 month"));//le sumo un mes
+          $last_day_mes_actual = date('Y-m-d',strtotime("{$f_mes_actual} - 1 day"));//le resto un dia
+
+          $fechaMesAnterior= date('Y-m-d',strtotime("{$fechaMesActual} - 1 month"));//le sumo un mes
+          $f_mes_anterior= date('Y-m-d',strtotime("{$fechaMesAnterior} + 1 month"));//le sumo un mes
+          $last_day_mes_anterior = date('Y-m-d',strtotime("{$f_mes_anterior} - 1 day"));//le resto un dia
+          
+          if(isset($idProveedor)){
+            $proveedor = Proveedor::where('idProveedor',$idProveedor)->first();
+          }else{
+            $proveedor = Proveedor::where('idUsuario',$_SESSION['id'])->first();
+          }
+          if(isset($proveedor)){
+            if(isset($idEmpresa)){
+              $empresa = Empresa::select('empresas.*')
+                        ->join('empresasProveedores','empresasProveedores.idEmpresa','=','empresas.idEmpresa')
+                        ->where('empresasProveedores.idProveedor',$proveedor->idProveedor)
+                        ->where('empresas.idEmpresa',$idEmpresa)
+                        ->first();
+              if(isset($empresa)){
+                $empresa = Empresa::where('idEmpresa',$idEmpresa)->first();
+                if($empresa){
+                  $gananciasMesActual = Pedido::select('pedidos.precioTotal')
+                                    ->join('empleados','empleados.idUsuario','=','pedidos.idUsuario')
+                                    ->where('empleados.idEmpresa',$empresa->idEmpresa)
+                                    ->where('pedidos.valido',0)
+                                    ->where('pedidos.fecha','>',$fechaMesActual.'-1')->where('pedidos.fecha','<',$last_day_mes_actual)
+                                    ->sum('pedidos.precioTotal');
+                  $gananciasMesAnterior = Pedido::select('pedidos.*')
+                                    ->join('empleados','empleados.idUsuario','=','pedidos.idUsuario')
+                                    ->where('empleados.idEmpresa',$empresa->idEmpresa)
+                                    ->where('pedidos.valido',0)
+                                    ->where('pedidos.fecha','>',$fechaMesAnterior.'-1')->where('pedidos.fecha','<',$last_day_mes_anterior)
+                                    ->sum('pedidos.precioTotal');
+                  return array("gananciasMesAnterior"=>$gananciasMesAnterior,"gananciasMesActual"=>$gananciasMesActual);
+                }
+                        }
+            }else{
+              $empresas = $proveedor->empresas;
+              if(isset($empresas)){
+                $gananciasMesActual=0;
+                $gananciasMesAnterior=0;
+                foreach($empresas as $empresa){
+                  if($empresa){
+                    $gananciasMesActual += Pedido::select('pedidos.precioTotal')
+                                      ->join('empleados','empleados.idUsuario','=','pedidos.idUsuario')
+                                      ->where('empleados.idEmpresa',$empresa->idEmpresa)
+                                      ->where('valido',0)
+                                      ->where('fecha','>',$fechaMesActual.'-1')->where('fecha','<',$last_day_mes_actual)
+                                      ->sum('pedidos.precioTotal');
+                    $gananciasMesAnterior += Pedido::select('pedidos.precioTotal')
+                                      ->join('empleados','empleados.idUsuario','=','pedidos.idUsuario')
+                                      ->where('empleados.idEmpresa',$empresa->idEmpresa)
+                                      ->where('valido',0)
+                                      ->where('fecha','>',$fechaMesAnterior.'-1')->where('fecha','<',$last_day_mes_anterior)
+                                      ->sum('pedidos.precioTotal');
+                  }
+                }
+                return array("gananciasMesAnterior"=>$gananciasMesAnterior,"gananciasMesActual"=>$gananciasMesActual);
+              }
+            }
+            
+          }
+        }
+        public static function getGananciasTotalCompartivo($idProveedor=null){
+          $fechaMesActual = date('Y-m');
+          $f_mes_actual= date('Y-m-d',strtotime("{$fechaMesActual} + 1 month"));//le sumo un mes
+          $last_day_mes_actual = date('Y-m-d',strtotime("{$f_mes_actual} - 1 day"));//le resto un dia
+
+          $fechaMesAnterior= date('Y-m-d',strtotime("{$fechaMesActual} - 1 month"));//le sumo un mes
+          $f_mes_anterior= date('Y-m-d',strtotime("{$fechaMesAnterior} + 1 month"));//le sumo un mes
+          $last_day_mes_anterior = date('Y-m-d',strtotime("{$f_mes_anterior} - 1 day"));//le resto un dia
+          
+          if(isset($idProveedor)){
+            $proveedor = Proveedor::where('idProveedor',$idProveedor)->first();
+          }else{
+            $proveedor = Proveedor::where('idUsuario',$_SESSION['id'])->first();
+          }
+          if(isset($proveedor)){
+            $gananciasMesActual = Pedido::select('pedidos.precioTotal')
+            ->join('menus','menus.idMenu','=','pedidos.idMenu')
+            ->where('menus.idProveedor',$proveedor->idProveedor)
+            ->where('pedidos.fecha','>',$fechaMesActual.'-1')->where('pedidos.fecha','<',$last_day_mes_actual)
+            ->sum('precioTotal');
+            $gananciasMesAnterior= Pedido::select('pedidos.precioTotal')
+            ->join('menus','menus.idMenu','=','pedidos.idMenu')
+            ->where('menus.idProveedor',$proveedor->idProveedor)
+            ->where('pedidos.fecha','>',$fechaMesAnterior.'-1')->where('pedidos.fecha','<',$last_day_mes_anterior)
+            ->sum('precioTotal');
+            return array("gananciasMesAnterior"=>$gananciasMesAnterior,"gananciasMesActual"=>$gananciasMesActual);
+          }
+        }
+        public static function getGananciasParticularesCompartivo($idProveedor=null){
+
+          $fechaMesActual = date('Y-m');
+          $f_mes_actual= date('Y-m-d',strtotime("{$fechaMesActual} + 1 month"));//le sumo un mes
+          $last_day_mes_actual = date('Y-m-d',strtotime("{$f_mes_actual} - 1 day"));//le resto un dia
+
+          $fechaMesAnterior= date('Y-m-d',strtotime("{$fechaMesActual} - 1 month"));//le sumo un mes
+          $f_mes_anterior= date('Y-m-d',strtotime("{$fechaMesAnterior} + 1 month"));//le sumo un mes
+          $last_day_mes_anterior = date('Y-m-d',strtotime("{$f_mes_anterior} - 1 day"));//le resto un dia
+          
+          if(isset($idProveedor)){
+            $proveedor = Proveedor::where('idProveedor',$idProveedor)->first();
+          }else{
+            $proveedor = Proveedor::where('idUsuario',$_SESSION['id'])->first();
+          }
+          if(isset($proveedor)){
+            $gananciasMesActual = Pedido::select('pedidos.precioTotal')
+                        ->join('usuarios','usuarios.idUsuario','=','pedidos.idUsuario')
+                        ->join('menus','menus.idMenu','=','pedidos.idMenu')
+                        ->where('menus.idProveedor',$proveedor->idProveedor)
+                        ->where('usuarios.tipoUsuario',5)
+                        ->where('pedidos.fecha','>',$fechaMesActual.'-1')->where('pedidos.fecha','<',$last_day_mes_actual)
+                        ->sum('precioTotal');
+            $gananciasMesAnterior= Pedido::select('pedidos.precioTotal')
+                      ->join('usuarios','usuarios.idUsuario','=','pedidos.idUsuario')
+                      ->join('menus','menus.idMenu','=','pedidos.idMenu')
+                      ->where('menus.idProveedor',$proveedor->idProveedor)
+                      ->where('usuarios.tipoUsuario',5)
+                      ->where('pedidos.fecha','>',$fechaMesAnterior.'-1')->where('pedidos.fecha','<',$last_day_mes_anterior)
+                      ->sum('precioTotal');
+            return array("gananciasMesAnterior"=>$gananciasMesAnterior,"gananciasMesActual"=>$gananciasMesActual);
+          }
+        }
+        public static function getGananciasProveedorTotal($idProveedor=null){
+          if(isset($idProveedor)){
+            $proveedor = Proveedor::where('idProveedor',$idProveedor)->first();
+          }else{
+            $proveedor = Proveedor::where('idUsuario',$_SESSION['id'])->first();
+          }
+          if(isset($proveedor)){
+            $pedidos = Pedido::select('pedidos.precioTotal')
+            ->join('menus','menus.idMenu','=','pedidos.idMenu')
+            ->where('menus.idProveedor',$proveedor->idProveedor)
+            ->where('pedidos.valido',0)
+            ->sum('precioTotal');
+            return $pedidos;
+          }
+        }
+    }
